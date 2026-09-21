@@ -1,9 +1,9 @@
-ARG UBUNTU_VERSION=26.04
+ARG UBUNTU_VERSION=26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 ARG BUILD_DATE=N/A
 ARG APP_VERSION=N/A
 ARG APP_REVISION=N/A
 
-ARG NODE_VERSION=24
+ARG NODE_VERSION=24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
 
 FROM docker.io/node:$NODE_VERSION AS web
 
@@ -16,6 +16,7 @@ RUN npm ci
 
 COPY tools/ui/ ./
 RUN LLAMA_BUILD_NUMBER="$APP_VERSION" npm run build
+RUN mkdir /licenses && find node_modules -type f \( -iname '*license*' -o -iname '*notice*' -o -iname '*copying*' \) -exec cp --parents '{}' /licenses/ \;
 
 FROM docker.io/ubuntu:$UBUNTU_VERSION AS build
 
@@ -33,8 +34,10 @@ COPY . .
 
 COPY --from=web /app/tools/ui/dist tools/ui/dist
 
-RUN cmake -B build -DGGML_NATIVE=OFF -DGGML_VULKAN=ON -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON && \
-    cmake --build build --config Release -j$(nproc)
+ARG APP_REVISION
+ARG BUILD_JOBS=2
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_COMMIT="$APP_REVISION" -DGGML_NATIVE=OFF -DGGML_VULKAN=ON -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON && \
+    cmake --build build --config Release -j"$BUILD_JOBS"
 
 RUN mkdir -p /app/lib && \
     find build -name "*.so*" -exec cp -P {} /app/lib \;
@@ -47,6 +50,12 @@ RUN mkdir -p /app/full \
     && cp -r requirements /app/full \
     && cp requirements.txt /app/full \
     && cp .devops/tools.sh /app/full/tools.sh
+
+RUN mkdir -p /app/build-info /app/licenses && \
+    c++ --version > /app/build-info/compiler.txt && \
+    dpkg-query -W > /app/build-info/build-packages.tsv && \
+    cp LICENSE AUTHORS /app/licenses/ && \
+    find vendor -type f \( -iname '*license*' -o -iname '*notice*' -o -iname '*copying*' \) -exec cp --parents '{}' /app/licenses/ \;
 
 ## Base image
 FROM docker.io/ubuntu:$UBUNTU_VERSION AS base
@@ -74,6 +83,11 @@ RUN apt-get update \
     && find /var/cache -type f -delete
 
 COPY --from=build /app/lib/ /app
+COPY --from=build /app/build-info/ /usr/share/strix/
+COPY --from=build /app/licenses/ /usr/share/licenses/strix/
+COPY --from=web /licenses/ /usr/share/licenses/strix-ui/
+COPY tools/ui/package-lock.json /usr/share/strix/package-lock.json
+RUN dpkg-query -W > /usr/share/strix/runtime-packages.tsv
 
 ### Full
 FROM base AS full

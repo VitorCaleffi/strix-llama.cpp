@@ -1,568 +1,128 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# GitHub recommends pinning actions to a commit SHA.
-# To get a newer version, you will need to update the SHA.
-# You can also reference a tag or branch, but the action may change without warning.
-
-name: Publish Docker image
+name: Publish Vulkan image
 
 on:
-  workflow_dispatch: # allows manual triggering
-    inputs:
-      skip_s390x:
-        description: "Skip the s390x build target (useful for fast test runs that do not need the IBM Z runner)"
-        type: boolean
-        default: false
-  schedule:
-    # Rebuild daily rather than on every push because it is expensive
-    - cron: '12 4 * * *'
+  push:
+    branches: [master]
+  pull_request:
+    paths: [.devops/vulkan.Dockerfile, .github/workflows/docker.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
-  cancel-in-progress: true
-
-# Fine-grant permission
-# https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token
-permissions:
-  packages: write
+  group: vulkan-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  create_tag:
-    name: Create and push git tag
-    runs-on: ubuntu-slim
-    permissions:
-      contents: write
-    outputs:
-      source_tag: ${{ steps.srctag.outputs.name }}
-
-    steps:
-      - name: Clone
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ssh-key: ${{ secrets.DEPLOY_KEY_RELEASE }}
-
-      - name: Determine source tag name
-        id: srctag
-        uses: ./.github/actions/get-tag-name
-        env:
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-
-      - name: Create and push git tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git tag ${{ steps.srctag.outputs.name }} || exit 0
-          git push origin ${{ steps.srctag.outputs.name }} || exit 0
-
-  build_ui:
-    name: Build UI
-    needs: create_tag
-    uses: ./.github/workflows/ui-build.yml
-    with:
-      ui_version: ${{ needs.create_tag.outputs.source_tag }}
-
-  prepare_matrices:
-    name: Prepare Docker matrices
+  build:
+    if: github.repository == 'VitorCaleffi/strix-llama.cpp'
     runs-on: ubuntu-24.04
-    outputs:
-      build_matrix: ${{ steps.matrices.outputs.build_matrix }}
-      merge_matrix: ${{ steps.matrices.outputs.merge_matrix }}
-
+    timeout-minutes: 90
     steps:
-      - name: Generate build and merge matrices
-        id: matrices
-        shell: bash
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build existing Vulkan server target
         env:
-          SKIP_S390X: ${{ inputs.skip_s390x || 'false' }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-
-          # Keep all build targets in one place and derive merge targets from it.
-          cat > build-matrix.json <<'JSON'
-          [
-            { "tag": "cpu", "dockerfile": ".devops/cpu.Dockerfile", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": false, "runs_on": "ubuntu-24.04" },
-            { "tag": "cpu", "dockerfile": ".devops/cpu.Dockerfile", "platforms": "linux/arm64", "full": true, "light": true, "server": true, "free_disk_space": false, "runs_on": "ubuntu-24.04-arm" },
-            { "tag": "cpu", "dockerfile": ".devops/s390x.Dockerfile", "platforms": "linux/s390x", "full": true, "light": true, "server": true, "free_disk_space": false, "runs_on": "ubuntu-24.04-s390x", "prebuilt_ui": true },
-            { "tag": "cuda cuda12", "dockerfile": ".devops/cuda.Dockerfile", "cuda_version": "12.8.1", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04" },
-            { "tag": "cuda cuda12", "dockerfile": ".devops/cuda.Dockerfile", "cuda_version": "12.8.1", "platforms": "linux/arm64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04-arm" },
-            { "tag": "cuda13", "dockerfile": ".devops/cuda.Dockerfile", "cuda_version": "13.3.0", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04" },
-            { "tag": "cuda13", "dockerfile": ".devops/cuda.Dockerfile", "cuda_version": "13.3.0", "platforms": "linux/arm64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04-arm" },
-            { "tag": "musa", "dockerfile": ".devops/musa.Dockerfile", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04" },
-            { "tag": "intel", "dockerfile": ".devops/intel.Dockerfile", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04" },
-            { "tag": "vulkan", "dockerfile": ".devops/vulkan.Dockerfile", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": false, "runs_on": "ubuntu-24.04" },
-            { "tag": "vulkan", "dockerfile": ".devops/vulkan.Dockerfile", "platforms": "linux/arm64", "full": true, "light": true, "server": true, "free_disk_space": false, "runs_on": "ubuntu-24.04-arm" },
-            { "tag": "rocm", "dockerfile": ".devops/rocm.Dockerfile", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": true, "runs_on": "ubuntu-24.04" },
-            { "tag": "openvino", "dockerfile": ".devops/openvino.Dockerfile", "platforms": "linux/amd64", "full": true, "light": true, "server": true, "free_disk_space": false, "runs_on": "ubuntu-24.04" }
-          ]
-          JSON
-
-          if [ "${SKIP_S390X}" = "true" ]; then
-            jq 'map(select(.platforms != "linux/s390x"))' build-matrix.json > build-matrix.json.tmp
-            mv build-matrix.json.tmp build-matrix.json
-          fi
-
-          BUILD_MATRIX="$(jq -c . build-matrix.json)"
-          MERGE_MATRIX="$(jq -c '
-            reduce .[] as $entry ({}; .[$entry.tag] |= (
-              . // {
-                tag: $entry.tag,
-                arches: [],
-                full: false,
-                light: false,
-                server: false
-              }
-              | .full = (.full or ($entry.full // false))
-              | .light = (.light or ($entry.light // false))
-              | .server = (.server or ($entry.server // false))
-              | .arches += [($entry.platforms | sub("^linux/"; ""))]
-            ))
-            # Backward compatibility: s390x tags are aliases of cpu for the linux/s390x platform.
-            | if (has("cpu") and (((.cpu.arches // []) | index("s390x")) != null)) then
-                . + {
-                  s390x: {
-                    tag: "s390x",
-                    arches: ["s390x"],
-                    full: .cpu.full,
-                    light: .cpu.light,
-                    server: .cpu.server
-                  }
-                }
-              else
-                .
-              end
-            | [.[] | .arches = (.arches | unique | sort | join(" "))]
-          ' build-matrix.json)"
-
-          echo "build_matrix=$BUILD_MATRIX" >> "$GITHUB_OUTPUT"
-          echo "merge_matrix=$MERGE_MATRIX" >> "$GITHUB_OUTPUT"
-
-  push_to_registry:
-    name: Push Docker image to Docker Registry
-    needs: [prepare_matrices, create_tag, build_ui]
-
-    runs-on: ${{ matrix.config.runs_on }}
-    strategy:
-      fail-fast: false
-      matrix:
-        config: ${{ fromJSON(needs.prepare_matrices.outputs.build_matrix) }}
-    steps:
-      - name: Check out the repo
-        id: checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.create_tag.outputs.source_tag }}
-
-      - name: Download prebuilt UI
-        if: ${{ matrix.config.prebuilt_ui == true }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: llama-ui.zip
-          path: tools/ui/dist
-
-      - name: Set up QEMU
-        if: ${{ contains(matrix.config.platforms, 'linux/amd64') }}
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
-        with:
-          image: tonistiigi/binfmt:qemu-v10.2.1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
-
-      - name: Log in to Docker Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Determine image metadata
-        id: meta
-        shell: bash
+          mkdir -p "$RUNNER_TEMP/source" release
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/source"
+          docker buildx create --use
+          docker buildx build --platform linux/amd64 --target server \
+            --build-arg APP_REVISION="$SOURCE_SHA" --build-arg APP_VERSION="strix-$SOURCE_SHA" \
+            --build-arg IMAGE_SOURCE="https://github.com/VitorCaleffi/strix-llama.cpp" \
+            --build-arg IMAGE_URL="https://github.com/VitorCaleffi/strix-llama.cpp" \
+            --build-arg BUILD_JOBS=2 --provenance=false \
+            --output "type=oci,dest=$PWD/release/image.tar" \
+            -f "$RUNNER_TEMP/source/.devops/vulkan.Dockerfile" "$RUNNER_TEMP/source"
+      - name: Smoke test and scan the artifact
+        env:
+          SOURCE_SHA: ${{ github.sha }}
         run: |
-          set -euo pipefail
-
-          REPO_OWNER="${GITHUB_REPOSITORY_OWNER@L}"  # to lower case
-          REPO_NAME="${{ github.event.repository.name }}"
-          IMAGE_REPO="ghcr.io/${REPO_OWNER}/${REPO_NAME}"
-          PREFIX="${IMAGE_REPO}:"
-          PLATFORM="${{ matrix.config.platforms }}"
-          ARCH_SUFFIX="${PLATFORM#linux/}"
-
-          # list all tags possible
-          tags="${{ matrix.config.tag }}"
-          for tag in $tags; do
-              if [[ "$tag" == "cpu" ]]; then
-                  TYPE=""
-              else
-                  TYPE="-$tag"
-              fi
-              CACHETAG="${PREFIX}buildcache${TYPE}-${ARCH_SUFFIX}"
+          sudo apt-get update && sudo apt-get install -y skopeo
+          skopeo copy oci-archive:release/image.tar docker-daemon:strix:test
+          docker run --rm --network none strix:test --version 2>&1 | tee release/version.txt
+          grep -F "$SOURCE_SHA" release/version.txt
+          docker run --rm --network none strix:test --help > release/help.txt 2>&1
+          for flag in --mmproj --spec-type --spec-draft-n-max --cache-ram --no-cache-idle-slots --api-key-file --metrics; do
+            grep -F -- "$flag" release/help.txt
           done
-
-          SAFE_TAGS="$(echo "$tags" | tr ' ' '_')"
-
-          echo "image_repo=$IMAGE_REPO" >> $GITHUB_OUTPUT
-          echo "arch_suffix=$ARCH_SUFFIX" >> $GITHUB_OUTPUT
-          echo "cache_output_tag=$CACHETAG" >> $GITHUB_OUTPUT
-          echo "digest_artifact_suffix=${SAFE_TAGS}-${ARCH_SUFFIX}" >> $GITHUB_OUTPUT
-          echo "cache_output_tag=$CACHETAG"  # print out for debugging
-        env:
-          GITHUB_REPOSITORY_OWNER: '${{ github.repository_owner }}'
-
-      - name: Get build date
-        id: build_date
-        run: echo "date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
-
-      - name: Free Disk Space (Ubuntu)
-        if: ${{ matrix.config.free_disk_space == true }}
-        uses: ggml-org/free-disk-space@v1.3.1
+          docker run --rm --network none --entrypoint sh strix:test -ec '
+            for file in /app/llama-server /app/*.so*; do
+              output=$(ldd "$file"); ! echo "$output" | grep "not found"
+            done
+            test -s /usr/share/licenses/strix/LICENSE
+            find /usr/share/vulkan/icd.d -name "*radeon*" | grep .
+            curl --version
+          '
+          docker run --rm --network none strix:test --verbose --list-devices 2>&1 | tee release/devices.txt
+          grep -F 'loaded Vulkan backend' release/devices.txt
+          mkdir release/oci
+          tar -xf release/image.tar -C release/oci
+          scanner='aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
+          scan() { docker run --rm -v "$PWD/release:/scan" "$scanner" image --input /scan/oci --scanners vuln "$@"; }
+          scan --format cyclonedx --output /scan/sbom.json
+          scan --format json --output /scan/vulnerabilities.json
+          scan --ignore-unfixed --severity CRITICAL --exit-code 1
+          sha256sum release/image.tar > release/image.tar.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
-          # this might remove tools that are actually needed,
-          # if set to "true" but frees about 6 GB
-          tool-cache: false
-
-          # all of these default to true, but feel free to set to
-          # "false" if necessary for your workflow
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
-      - name: Build and push Full Docker image by digest
-        id: build_full
-        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.config.full == true }}
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+          name: reports
+          path: |
+            release/*.json
+            release/*.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          context: .
-          platforms: ${{ matrix.config.platforms }}
-          outputs: type=image,name=${{ steps.meta.outputs.image_repo }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
-          file: ${{ matrix.config.dockerfile }}
-          target: full
-          provenance: false
-          build-args: |
-            BUILD_DATE=${{ steps.build_date.outputs.date }}
-            APP_VERSION=${{ needs.create_tag.outputs.source_tag }}
-            APP_REVISION=${{ steps.checkout.outputs.commit }}
-            IMAGE_URL=${{ github.server_url }}/${{ github.repository }}
-            IMAGE_SOURCE=${{ github.server_url }}/${{ github.repository }}
-            ${{ matrix.config.ubuntu_version && format('UBUNTU_VERSION={0}', matrix.config.ubuntu_version) || '' }}
-            ${{ matrix.config.cuda_version && format('CUDA_VERSION={0}', matrix.config.cuda_version) || '' }}
-          annotations: |
-            manifest:org.opencontainers.image.created=${{ steps.build_date.outputs.date }}
-            manifest:org.opencontainers.image.version=${{ needs.create_tag.outputs.source_tag }}
-            manifest:org.opencontainers.image.revision=${{ steps.checkout.outputs.commit }}
-            manifest:org.opencontainers.image.title=llama.cpp
-            manifest:org.opencontainers.image.description=LLM inference in C/C++
-            manifest:org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            manifest:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          # using github experimental cache
-          #cache-from: type=gha
-          #cache-to: type=gha,mode=max
-          # return to this if the experimental github cache is having issues
-          #cache-to: type=local,dest=/tmp/.buildx-cache
-          #cache-from: type=local,src=/tmp/.buildx-cache
-          # using registry cache (no storage limit)
-          cache-from: type=registry,ref=${{ steps.meta.outputs.cache_output_tag }}
-          cache-to: type=registry,ref=${{ steps.meta.outputs.cache_output_tag }},mode=max
-
-      - name: Build and push Light Docker image by digest
-        id: build_light
-        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.config.light == true }}
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
-        with:
-          context: .
-          platforms: ${{ matrix.config.platforms }}
-          outputs: type=image,name=${{ steps.meta.outputs.image_repo }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
-          file: ${{ matrix.config.dockerfile }}
-          target: light
-          provenance: false
-          build-args: |
-            BUILD_DATE=${{ steps.build_date.outputs.date }}
-            APP_VERSION=${{ needs.create_tag.outputs.source_tag }}
-            APP_REVISION=${{ steps.checkout.outputs.commit }}
-            IMAGE_URL=${{ github.server_url }}/${{ github.repository }}
-            IMAGE_SOURCE=${{ github.server_url }}/${{ github.repository }}
-            ${{ matrix.config.ubuntu_version && format('UBUNTU_VERSION={0}', matrix.config.ubuntu_version) || '' }}
-            ${{ matrix.config.cuda_version && format('CUDA_VERSION={0}', matrix.config.cuda_version) || '' }}
-          annotations: |
-            manifest:org.opencontainers.image.created=${{ steps.build_date.outputs.date }}
-            manifest:org.opencontainers.image.version=${{ needs.create_tag.outputs.source_tag }}
-            manifest:org.opencontainers.image.revision=${{ steps.checkout.outputs.commit }}
-            manifest:org.opencontainers.image.title=llama.cpp
-            manifest:org.opencontainers.image.description=LLM inference in C/C++
-            manifest:org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            manifest:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          # using github experimental cache
-          #cache-from: type=gha
-          #cache-to: type=gha,mode=max
-          # return to this if the experimental github cache is having issues
-          #cache-to: type=local,dest=/tmp/.buildx-cache
-          #cache-from: type=local,src=/tmp/.buildx-cache
-          # using registry cache (no storage limit)
-          cache-from: type=registry,ref=${{ steps.meta.outputs.cache_output_tag }}
-          cache-to: type=registry,ref=${{ steps.meta.outputs.cache_output_tag }},mode=max
-
-      - name: Build and push Server Docker image by digest
-        id: build_server
-        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.config.server == true }}
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
-        with:
-          context: .
-          platforms: ${{ matrix.config.platforms }}
-          outputs: type=image,name=${{ steps.meta.outputs.image_repo }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
-          file: ${{ matrix.config.dockerfile }}
-          target: server
-          provenance: false
-          build-args: |
-            BUILD_DATE=${{ steps.build_date.outputs.date }}
-            APP_VERSION=${{ needs.create_tag.outputs.source_tag }}
-            APP_REVISION=${{ steps.checkout.outputs.commit }}
-            IMAGE_URL=${{ github.server_url }}/${{ github.repository }}
-            IMAGE_SOURCE=${{ github.server_url }}/${{ github.repository }}
-            ${{ matrix.config.ubuntu_version && format('UBUNTU_VERSION={0}', matrix.config.ubuntu_version) || '' }}
-            ${{ matrix.config.cuda_version && format('CUDA_VERSION={0}', matrix.config.cuda_version) || '' }}
-          annotations: |
-            manifest:org.opencontainers.image.created=${{ steps.build_date.outputs.date }}
-            manifest:org.opencontainers.image.version=${{ needs.create_tag.outputs.source_tag }}
-            manifest:org.opencontainers.image.revision=${{ steps.checkout.outputs.commit }}
-            manifest:org.opencontainers.image.title=llama.cpp
-            manifest:org.opencontainers.image.description=LLM inference in C/C++
-            manifest:org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            manifest:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          # using github experimental cache
-          #cache-from: type=gha
-          #cache-to: type=gha,mode=max
-          # return to this if the experimental github cache is having issues
-          #cache-to: type=local,dest=/tmp/.buildx-cache
-          #cache-from: type=local,src=/tmp/.buildx-cache
-          # using registry cache (no storage limit)
-          cache-from: type=registry,ref=${{ steps.meta.outputs.cache_output_tag }}
-          cache-to: type=registry,ref=${{ steps.meta.outputs.cache_output_tag }},mode=max
-
-      - name: Export digest metadata
-        shell: bash
-        run: |
-            set -euo pipefail
-
-            TAGS="${{ matrix.config.tag }}"
-            ARCH_SUFFIX="${{ steps.meta.outputs.arch_suffix }}"
-            DIGEST_FILE="/tmp/digests/${{ steps.meta.outputs.digest_artifact_suffix }}.tsv"
-            mkdir -p /tmp/digests
-
-            add_digest_rows() {
-                local image_type="$1"
-                local digest="$2"
-
-                if [[ -z "$digest" ]]; then
-                  echo "Missing digest for image_type=${image_type}" >&2
-                  exit 1
-                fi
-
-                for tag in $TAGS; do
-                    printf '%s\t%s\t%s\t%s\n' "$tag" "$ARCH_SUFFIX" "$image_type" "$digest" >> "$DIGEST_FILE"
-                done
-            }
-
-            if [[ "${{ matrix.config.full }}" == "true" ]]; then
-                add_digest_rows "full" "${{ steps.build_full.outputs.digest }}"
-            fi
-
-            if [[ "${{ matrix.config.light }}" == "true" ]]; then
-                add_digest_rows "light" "${{ steps.build_light.outputs.digest }}"
-            fi
-
-            if [[ "${{ matrix.config.server }}" == "true" ]]; then
-                add_digest_rows "server" "${{ steps.build_server.outputs.digest }}"
-            fi
-
-      - name: Upload digest metadata
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
-        with:
-          name: digests-${{ steps.meta.outputs.digest_artifact_suffix }}
-          path: /tmp/digests/${{ steps.meta.outputs.digest_artifact_suffix }}.tsv
+          name: tested-image
+          path: |
+            release/image.tar
+            release/image.tar.sha256
+          compression-level: 0
+          retention-days: 7
           if-no-files-found: error
 
-  merge_arch_tags:
-    name: Create shared tags from digests
-    needs: [prepare_matrices, push_to_registry, create_tag]
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
-      contents: read
+      actions: read
       packages: write
-      id-token: write
-      attestations: write
-    strategy:
-      fail-fast: false
-      matrix:
-        config: ${{ fromJSON(needs.prepare_matrices.outputs.merge_matrix) }}
-
     steps:
-      - name: Check out the repo
-        id: checkout
-        uses: actions/checkout@v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          fetch-depth: 0
-
-      - name: Get build date
-        id: build_date
-        run: echo "date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
-
-      - name: Download digest metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: digests-*
-          path: /tmp/digests
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
-
-      - name: Log in to Docker Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create tags from digests
-        id: create_tags
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          REPO_OWNER="${GITHUB_REPOSITORY_OWNER@L}"  # to lower case
-          REPO_NAME="${{ github.event.repository.name }}"
-          IMAGE_REPO="ghcr.io/${REPO_OWNER}/${REPO_NAME}"
-          PREFIX="${IMAGE_REPO}:"
-          SRC_TAG="${{ needs.create_tag.outputs.source_tag }}"
-          BUILD_DATE="${{ steps.build_date.outputs.date }}"
-          COMMIT_SHA="${{ steps.checkout.outputs.commit }}"
-          echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
-          TAGS="${{ matrix.config.tag }}"
-          ARCHES="${{ matrix.config.arches }}"
-          DIGEST_GLOB="/tmp/digests/*.tsv"
-
-          if ! ls ${DIGEST_GLOB} >/dev/null 2>&1; then
-              echo "No digest metadata found in /tmp/digests" >&2
-              exit 1
-          fi
-
-          if [[ -z "$SRC_TAG" ]]; then
-              echo "Missing source tag from create_tag" >&2
-              exit 1
-          fi
-
-          find_digest() {
-              local tag_name="$1"
-              local arch="$2"
-              local image_type="$3"
-              local digest
-
-              digest="$(awk -F '\t' -v t="$tag_name" -v a="$arch" -v i="$image_type" '$1 == t && $2 == a && $3 == i { print $4; exit }' ${DIGEST_GLOB})"
-
-              # Backward compatibility: s390x tags are aliases of cpu for the linux/s390x platform.
-              if [[ -z "$digest" && "$tag_name" == "s390x" && "$arch" == "s390x" ]]; then
-                digest="$(awk -F '\t' -v t="cpu" -v a="$arch" -v i="$image_type" '$1 == t && $2 == a && $3 == i { print $4; exit }' ${DIGEST_GLOB})"
-              fi
-
-              if [[ -z "$digest" ]]; then
-                echo "Missing digest for tag=${tag_name} arch=${arch} image_type=${image_type}" >&2
-                exit 1
-              fi
-
-              echo "$digest"
-          }
-
-          create_manifest_tags() {
-              local image_type="$1"
-              local tag_name="$2"
-              local suffix="$3"
-
-              local merged_tag="${PREFIX}${image_type}${suffix}"
-              local merged_versioned_tag="${merged_tag}-${SRC_TAG}"
-
-              local refs=()
-
-              for arch in $ARCHES; do
-                  local digest
-                  digest="$(find_digest "$tag_name" "$arch" "$image_type")"
-                  refs+=("${IMAGE_REPO}@${digest}")
-              done
-
-              local annotations=(
-                  --annotation "index:org.opencontainers.image.created=${BUILD_DATE}"
-                  --annotation "index:org.opencontainers.image.version=${SRC_TAG}"
-                  --annotation "index:org.opencontainers.image.revision=${COMMIT_SHA}"
-                  --annotation "index:org.opencontainers.image.title=llama.cpp"
-                  --annotation "index:org.opencontainers.image.description=LLM inference in C/C++"
-                  --annotation "index:org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}"
-                  --annotation "index:org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}"
-              )
-
-              echo "Creating ${merged_tag} from ${refs[*]}"
-              docker buildx imagetools create "${annotations[@]}" --tag "${merged_tag}" "${refs[@]}"
-
-              echo "Creating ${merged_versioned_tag} from ${refs[*]}"
-              docker buildx imagetools create "${annotations[@]}" --tag "${merged_versioned_tag}" "${refs[@]}"
-
-              if [[ "$tag_name" == "${TAGS%% *}" ]]; then
-                  local digest
-                  digest="$(docker buildx imagetools inspect "${merged_versioned_tag}" --format '{{.Manifest.Digest}}')"
-                  if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-                      echo "Invalid digest for ${merged_versioned_tag}: ${digest}" >&2
-                      exit 1
-                  fi
-                  echo "${image_type}_digest=${digest}" >> "$GITHUB_OUTPUT"
-              fi
-          }
-
-          for tag in $TAGS; do
-              if [[ "$tag" == "cpu" ]]; then
-                  TYPE=""
-              else
-                  TYPE="-$tag"
-              fi
-
-              if [[ "${{ matrix.config.full }}" == "true" ]]; then
-                  create_manifest_tags "full" "$tag" "$TYPE"
-              fi
-
-              if [[ "${{ matrix.config.light }}" == "true" ]]; then
-                  create_manifest_tags "light" "$tag" "$TYPE"
-              fi
-
-              if [[ "${{ matrix.config.server }}" == "true" ]]; then
-                  create_manifest_tags "server" "$tag" "$TYPE"
-              fi
-          done
+          name: tested-image
+          path: release
+      - name: Publish tested image
         env:
-          GITHUB_REPOSITORY_OWNER: '${{ github.repository_owner }}'
-
-      - name: Attest full image
-        if: ${{ matrix.config.full }}
-        uses: actions/attest@v4
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          RELEASE_TAG: vulkan-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y skopeo
+          sha256sum --check release/image.tar.sha256
+          image="ghcr.io/vitorcaleffi/strix-llama-cpp:$RELEASE_TAG"
+          auth="$RUNNER_TEMP/auth.json"
+          trap 'rm -f "$auth"' EXIT
+          printf '%s' "$TOKEN" | skopeo login --authfile "$auth" -u "$ACTOR" --password-stdin ghcr.io
+          if skopeo inspect --authfile "$auth" "docker://$image" >/dev/null 2> "$RUNNER_TEMP/inspect-error"; then
+            echo 'Release tag exists; start a new workflow run.' >&2; exit 1
+          fi
+          grep -Eiq 'manifest unknown|name unknown|denied|404' "$RUNNER_TEMP/inspect-error"
+          skopeo copy --authfile "$auth" --preserve-digests --digestfile release/digest \
+            oci-archive:release/image.tar "docker://$image"
+          printf '%s@%s\n' "$image" "$(cat release/digest)" > release/image-reference.txt
+          cat release/image-reference.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          subject-name: ${{ steps.create_tags.outputs.image_repo }}
-          subject-digest: ${{ steps.create_tags.outputs.full_digest }}
-
-      - name: Attest light image
-        if: ${{ matrix.config.light }}
-        uses: actions/attest@v4
-        with:
-          subject-name: ${{ steps.create_tags.outputs.image_repo }}
-          subject-digest: ${{ steps.create_tags.outputs.light_digest }}
-
-      - name: Attest server image
-        if: ${{ matrix.config.server }}
-        uses: actions/attest@v4
-        with:
-          subject-name: ${{ steps.create_tags.outputs.image_repo }}
-          subject-digest: ${{ steps.create_tags.outputs.server_digest }}
+          name: image-reference
+          path: release/image-reference.txt
+          if-no-files-found: error
+      - name: Verify anonymous pull
+        run: |
+          mkdir "$RUNNER_TEMP/anonymous"
+          DOCKER_CONFIG="$RUNNER_TEMP/anonymous" docker pull "$(cat release/image-reference.txt)"

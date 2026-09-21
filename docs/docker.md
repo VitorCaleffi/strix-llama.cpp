@@ -1,5 +1,15 @@
 # Docker
 
+## This fork's Vulkan image
+
+This fork publishes `ghcr.io/vitorcaleffi/strix-llama-cpp` from the existing `.devops/vulkan.Dockerfile`, `server` target, for Linux amd64. The UI, Mesa RADV, curl and shared libraries are included. CPU native tuning is disabled and CMake uses Release mode. Base images are pinned by digest; compiler and installed package versions are recorded under `/usr/share/strix`. OS packages resolve at build time, so each build has a unique tag and deployment must include its digest.
+
+The `Publish Vulkan image` workflow builds and tests on GitHub-hosted runners. Pull requests build without publishing. Pushes to `master` and manual runs on `master` publish only after executable/library/backend checks and a fixable-critical vulnerability gate. Publication runs in a separate job with `packages: write`; build jobs receive no registry credentials. The context is a Git archive, with no `.git`, checkout credentials or private homelab files. There are no scheduled rebuilds, upstream-style release tags or `latest` tags.
+
+After first publication, make the package public in [package settings](https://github.com/users/VitorCaleffi/packages/container/strix-llama-cpp/settings). If GitHub Actions are disabled for this new fork, enable them in its Actions tab first. The workflow's `image-reference` artifact contains `ghcr.io/vitorcaleffi/strix-llama-cpp:vulkan-<commit>-<run>-<attempt>@sha256:<digest>`. The final step tests an anonymous pull; if it fails because visibility was private, make the package public and verify the artifact reference with `DOCKER_CONFIG` set to a new empty directory before deploying. A new workflow attempt gets a new tag.
+
+Keep every deployed digest and rollback digest. Update source with explicit Git changes, build, then promote the chosen digest in the deployment repository. The existing `full` target includes benchmark tools and is separate from the published `server` image. CI does not validate GPU inference, model correctness or performance on Strix Halo hardware.
+
 ## Prerequisites
 * Docker must be installed and running on your system.
 * Create a folder to store big models & intermediate files (ex. /llama/models)
