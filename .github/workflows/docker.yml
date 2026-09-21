@@ -59,8 +59,10 @@ jobs:
           '
           docker run --rm --network none strix:test --verbose --list-devices 2>&1 | tee release/devices.txt
           grep -F 'loaded Vulkan backend' release/devices.txt
+          mkdir release/oci
+          tar -xf release/image.tar -C release/oci
           scanner='aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
-          scan() { docker run --rm -v "$PWD/release:/scan" "$scanner" image --input /scan/image.tar --scanners vuln "$@"; }
+          scan() { docker run --rm -v "$PWD/release:/scan" "$scanner" image --input /scan/oci --scanners vuln "$@"; }
           scan --format cyclonedx --output /scan/sbom.json
           scan --format json --output /scan/vulnerabilities.json
           scan --ignore-unfixed --severity CRITICAL --exit-code 1
