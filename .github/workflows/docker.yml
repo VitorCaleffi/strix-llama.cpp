@@ -2,7 +2,7 @@ name: Publish Vulkan image
 
 on:
   push:
-    branches: [master, build/ghcr-vulkan]
+    branches: [master]
   pull_request:
     paths: [.devops/vulkan.Dockerfile, .github/workflows/docker.yml]
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
             find /usr/share/vulkan/icd.d -name "*radeon*" | grep .
             curl --version
           '
-          docker run --rm --network none strix:test --list-devices > release/devices.txt 2>&1
+          docker run --rm --network none strix:test --verbose --list-devices 2>&1 | tee release/devices.txt
           grep -F 'loaded Vulkan backend' release/devices.txt
           scanner='aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969'
           scan() { docker run --rm -v "$PWD/release:/scan" "$scanner" image --input /scan/image.tar --scanners vuln "$@"; }
