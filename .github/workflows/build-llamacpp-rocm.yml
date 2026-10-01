@@ -43,9 +43,7 @@ on:
       - '.github/actions/test-llamacpp-build/**'
       - 'scripts/rocm-release/**'
 
-  # Release every merge to master
-  push:
-    branches: [master]
+  # Fork syncs build only docker.yml; keep manual and pull-request checks.
 
 # a newer merge supersedes a release that is still building
 concurrency:

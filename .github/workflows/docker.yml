@@ -12,14 +12,24 @@ permissions:
 
 concurrency:
   group: vulkan-image-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    if: github.repository == 'VitorCaleffi/strix-llama.cpp'
+    if: github.repository == 'VitorCaleffi/strix-llama.cpp' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/master')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      - name: Reject superseded master revision
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo '::error::This revision is no longer master HEAD. Use the latest run.'
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -91,12 +101,23 @@ jobs:
     timeout-minutes: 20
     permissions:
       actions: read
+      contents: read
       packages: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tested-image
           path: release
+      - name: Reject superseded master revision
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo '::error::This revision is no longer master HEAD. Use the latest run.'
+            exit 1
+          fi
       - name: Publish tested image
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}

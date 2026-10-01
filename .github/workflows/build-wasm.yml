@@ -2,22 +2,7 @@ name: CI (wasm)
 
 on:
   workflow_dispatch: # allows manual triggering
-  push:
-    branches:
-      - master
-    paths: [
-      '.github/workflows/build-wasm.yml',
-      '**/CMakeLists.txt',
-      '**/.cmake',
-      '**/*.h',
-      '**/*.hpp',
-      '**/*.c',
-      '**/*.cpp',
-      '**/*.wgsl',
-      '**/*.tmpl',
-      'ggml/src/ggml-webgpu/wgsl-shaders/embed_wgsl.py'
-    ]
-
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     branches-ignore: ['**']
     types: [opened, synchronize, reopened]

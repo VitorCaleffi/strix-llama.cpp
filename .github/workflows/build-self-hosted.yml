@@ -2,28 +2,7 @@ name: CI (self-hosted)
 
 on:
   workflow_dispatch: # allows manual triggering
-  push:
-    branches:
-      - master
-    paths: [
-      '.github/workflows/build-self-hosted.yml',
-      'ci/run.sh',
-      '**/CMakeLists.txt',
-      '**/.cmake',
-      '**/*.h',
-      '**/*.hpp',
-      '**/*.c',
-      '**/*.cpp',
-      '**/*.cu',
-      '**/*.cuh',
-      '**/*.swift',
-      '**/*.m',
-      '**/*.metal',
-      '**/*.comp',
-      '**/*.glsl',
-      '**/*.wgsl'
-    ]
-
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     branches-ignore: ['**']
     types: [opened, synchronize, reopened]

@@ -2,6 +2,12 @@
 
 ## This fork's Vulkan image
 
+A sync or push to `master` starts only [Publish Vulkan image](../.github/workflows/docker.yml). It builds one Linux amd64 Vulkan `server` image, matching the home lab's backend and architecture. Other inherited workflows have no push triggers; their manual, pull-request, reusable, and scheduled triggers remain as configured. A single sync builds the pushed branch tip, not each imported commit.
+
+New runs cancel older pending or running image workflows on the same ref using [GitHub Actions concurrency](https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency). The build and publication steps also check the current `master` SHA and reject obsolete revisions, including reruns of old commits. Cancellation can leave partial artifacts; already published immutable images remain available. Manual publication is limited to current `master`; pull requests build and scan without publishing.
+
+When resolving an upstream sync, preserve this trigger policy and check newly added workflows for push triggers. Syncing with a discard/reset operation can erase fork-specific CI changes. Publishing an image does not update the home-lab deployment: adopt the tested image reference and digest separately through GitOps.
+
 This fork publishes `ghcr.io/vitorcaleffi/strix-llama-cpp` from the existing `.devops/vulkan.Dockerfile`, `server` target, for Linux amd64. The UI, Mesa RADV, curl and shared libraries are included. CPU native tuning is disabled and CMake uses Release mode. Base images are pinned by digest; compiler and installed package versions are recorded under `/usr/share/strix`. OS packages resolve at build time, so each build has a unique tag and deployment must include its digest.
 
 The `Publish Vulkan image` workflow builds and tests on GitHub-hosted runners. Pull requests build without publishing. Pushes to `master` and manual runs on `master` publish only after executable/library/backend checks and a fixable-critical vulnerability gate. Publication runs in a separate job with `packages: write`; build jobs receive no registry credentials. The context is a Git archive, with no `.git`, checkout credentials or private homelab files. There are no scheduled rebuilds, upstream-style release tags or `latest` tags.

@@ -2,17 +2,7 @@ name: CI (snapdragon)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-    paths:
-      - '.github/workflows/build-and-test-snapdragon.yml'
-      - 'ggml/include/ggml-hexagon.h'
-      - 'ggml/src/ggml-hexagon/**'
-      - 'docs/backend/snapdragon/**'
-      - 'scripts/snapdragon/**'
-      - 'CMakePresets.json'
-
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     branches-ignore: ['**']
     types: [opened, synchronize, reopened]

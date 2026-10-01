@@ -2,22 +2,7 @@ name: CI (apple)
 
 on:
   workflow_dispatch: # allows manual triggering
-  push:
-    branches:
-      - master
-    paths: [
-      '.github/workflows/build-apple.yml',
-      '**/CMakeLists.txt',
-      '**/.cmake',
-      '**/*.h',
-      '**/*.hpp',
-      '**/*.c',
-      '**/*.cpp',
-      '**/*.swift',
-      '**/*.m',
-      '**/*.metal'
-    ]
-
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     branches-ignore: ['**']
     types: [opened, synchronize, reopened]

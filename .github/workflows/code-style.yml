@@ -2,9 +2,7 @@ name: Code Style Checker
 
 on:
   workflow_dispatch: # allows manual triggering
-  push:
-    branches:
-      - master
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     branches:
       - master

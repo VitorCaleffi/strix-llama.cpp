@@ -2,14 +2,7 @@ name: Check vendor
 
 on:
   workflow_dispatch: # allows manual triggering
-  push:
-    branches:
-      - master
-    paths: [
-      'vendor/**',
-      'scripts/sync_vendor.py'
-    ]
-
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     types: [opened, synchronize, reopened]
     paths: [

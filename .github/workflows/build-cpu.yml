@@ -2,20 +2,7 @@ name: CI (cpu)
 
 on:
   workflow_dispatch: # allows manual triggering
-  push:
-    branches:
-      - master
-    paths: [
-      '.github/workflows/build-cpu.yml',
-      '.github/workflows/build-cmake-pkg.yml',
-      '**/CMakeLists.txt',
-      '**/.cmake',
-      '**/*.h',
-      '**/*.hpp',
-      '**/*.c',
-      '**/*.cpp',
-    ]
-
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     branches-ignore: ['**']
     types: [opened, synchronize, reopened]

@@ -1,13 +1,7 @@
 name: flake8 Lint
 
 on:
-  push:
-    branches:
-      - master
-    paths: [
-      '.github/workflows/python-lint.yml',
-      '**/*.py'
-    ]
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     types: [opened, synchronize, reopened]
     paths: [

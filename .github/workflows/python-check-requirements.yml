@@ -1,12 +1,7 @@
 name: Python check requirements.txt
 
 on:
-  push:
-    paths:
-      - '.github/workflows/python-check-requirements.yml'
-      - 'scripts/check-requirements.sh'
-      - 'convert*.py'
-      - '**/requirements*.txt'
+  # Fork syncs build only docker.yml; keep other triggers for explicit checks.
   pull_request:
     paths:
       - '.github/workflows/python-check-requirements.yml'
