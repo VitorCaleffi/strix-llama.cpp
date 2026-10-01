@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   server:
-    runs-on: hf-jobs-cpu-upgrade
+    runs-on: hf-jobs-cpu-performance
 
     strategy:
       matrix:
@@ -103,7 +103,7 @@ jobs:
         run: |
           source .venv/bin/activate
           cd tools/server/tests
-          PYTEST_WORKERS=1 ./tests.sh
+          PYTEST_WORKERS=4 ./tests.sh
 
       - name: Slow tests
         id: server_integration_tests_slow
@@ -111,4 +111,4 @@ jobs:
         run: |
           source .venv/bin/activate
           cd tools/server/tests
-          PYTEST_WORKERS=1 SLOW_TESTS=1 ./tests.sh
+          PYTEST_WORKERS=4 SLOW_TESTS=1 ./tests.sh

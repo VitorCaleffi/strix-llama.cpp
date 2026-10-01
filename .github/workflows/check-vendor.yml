@@ -12,7 +12,7 @@ on:
 
 jobs:
   check-vendor:
-    runs-on: [self-hosted, fast]
+    runs-on: ubuntu-slim
 
     steps:
       - name: Checkout
