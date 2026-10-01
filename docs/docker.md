@@ -2,7 +2,7 @@
 
 ## This fork's Vulkan image
 
-A sync or push to `master` starts only [Publish Vulkan image](../.github/workflows/docker.yml). It builds one Linux amd64 Vulkan `server` image, matching the home lab's backend and architecture. Other inherited workflows have no push triggers; their manual, pull-request, reusable, and scheduled triggers remain as configured. A single sync builds the pushed branch tip, not each imported commit.
+A sync or push to `master` starts only [Publish Vulkan image](../.github/workflows/docker.yml). It builds one Linux amd64 Vulkan `server` image, matching the home lab's backend and architecture. The inherited CANN workflow has no active jobs and is stored as `build-cann.yml.disabled` to avoid GitHub validation failures. Other inherited workflows have no push triggers; their manual, pull-request, reusable, and scheduled triggers remain as configured. A single sync builds the pushed branch tip, not each imported commit.
 
 New runs cancel older pending or running image workflows on the same ref using [GitHub Actions concurrency](https://docs.github.com/en/actions/concepts/workflows-and-actions/concurrency). The build and publication steps also check the current `master` SHA and reject obsolete revisions, including reruns of old commits. Cancellation can leave partial artifacts; already published immutable images remain available. Manual publication is limited to current `master`; pull requests build and scan without publishing.
 
