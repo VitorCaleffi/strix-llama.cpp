@@ -3,7 +3,9 @@ name: Fusion
 on:
   workflow_dispatch: # allows manual triggering
   # Fork syncs build only docker.yml; keep other triggers for explicit checks.
+  # Disable PR runs because the self-hosted Metal runner may be unavailable.
   pull_request:
+    branches-ignore: ['**']
     types: [opened, synchronize, reopened]
     paths: [
       '.github/workflows/fusion.yml',
