@@ -431,6 +431,14 @@ enum FaCodePath {
     FA_COOPMAT2,
 };
 
+// vk_fa_pipeline_state::flags bits beyond the ones get_fa_pipeline_state derives from its arguments (1..32);
+// the shader side is flash_attn_base.glsl / flash_attn_cm1_mr.comp
+static constexpr uint32_t FA_FLAG_V_TRANSPOSED = 64;    // V is read from the per-head V^T scratch
+static constexpr uint32_t FA_FLAG_MULTI_ROW    = 128;   // host only: build the pipeline from flash_attn_cm1_mr
+static constexpr uint32_t FA_FLAG_MR_LAZY      = 256;   // multi-row: skip identity O rescales
+static constexpr uint32_t FA_FLAG_MR_NOEB      = 512;   // multi-row: no loop-end barrier
+static constexpr uint32_t FA_FLAG_MR_VPOST     = 1024;  // multi-row: V^T loads before the softmax barrier
+
 struct vk_fa_pipeline_state {
     uint32_t HSK, HSV;
     uint32_t Br, Bc;
@@ -642,6 +650,8 @@ enum rms_norm_mode {
     RMS_NORM_MUL_ROPE,
     RMS_NORM_MUL_ROPE_VIEW_SET_ROWS,
     RMS_NORM_VIEW_SET_ROWS,
+    RMS_NORM_MUL_MUL,   // short rows only: normalised * gamma * gate
+    RMS_NORM_SCALE,     // short rows only: scale(rms_norm(x))
     RMS_NORM_COUNT,
 };
 
@@ -828,6 +838,7 @@ struct vk_device_struct {
 
     vk_pipeline pipeline_dequant[GGML_TYPE_COUNT];
     vk_pipeline pipeline_dequant_transpose[GGML_TYPE_COUNT]; // fused dequant+transpose for FA quant-KV
+    vk_pipeline pipeline_dequant_f16_transpose_vt; // f16 V -> V^T per head for the coopmat1 FA (V_TRANSPOSED)
     vk_pipeline pipeline_dequant_mul_mat_vec_f32_f32[DMMV_WG_SIZE_COUNT][GGML_TYPE_COUNT][mul_mat_vec_max_cols];
     vk_pipeline pipeline_dequant_mul_mat_vec_f16_f32[DMMV_WG_SIZE_COUNT][GGML_TYPE_COUNT][mul_mat_vec_max_cols];
     vk_pipeline pipeline_dequant_mul_mat_vec_id_f32[DMMV_WG_SIZE_COUNT][GGML_TYPE_COUNT];
@@ -893,6 +904,10 @@ struct vk_device_struct {
     vk_pipeline pipeline_rms_norm_mul_add_mul_partials_f32;
     vk_pipeline pipeline_rms_norm_set_rows_f32_f32;
     vk_pipeline pipeline_rms_norm_set_rows_f32_f16;
+    vk_pipeline pipeline_rms_norm_small_f32;          // one subgroup per row, ne00 <= 256
+    vk_pipeline pipeline_rms_norm_mul_small_f32;
+    vk_pipeline pipeline_rms_norm_mul_mul_small_f32;  // + second multiplier (gated norm)
+    vk_pipeline pipeline_rms_norm_scale_small_f32;    // + SCALE (the GDN q/k l2 norm)
     vk_pipeline pipeline_rms_norm_partials_f32;
     vk_pipeline pipeline_rms_norm_mul_partials_f32;
     vk_pipeline pipeline_rms_norm_mul_rope_f32_f32;
@@ -1011,7 +1026,9 @@ struct vk_device_struct {
     vk_pipeline pipeline_lightning_indexer_cm_small_f16[LI_NH_COUNT];
     vk_pipeline pipeline_lightning_indexer_decode_cm_f16[LI_NH_COUNT];
     vk_pipeline pipeline_flash_attn_top_k_f16;
-    vk_pipeline pipeline_flash_attn_sel_f16[3]; // maskless selected-key FA, GQA 4, 8, 12
+    vk_pipeline pipeline_flash_attn_sel_f16[3];    // maskless selected-key FA, GQA 4, 8, 12 (scalar, portable)
+    vk_pipeline pipeline_flash_attn_sel_cm_f16[3]; // the same on RDNA3 + RADV (WMMA, gfx11 fragment layout)
+    vk_pipeline pipeline_flash_attn_sel_prep;      // cleans the selection rows for both
     vk_pipeline pipeline_flash_attn_top_k_cm_f16;
     vk_pipeline pipeline_flash_attn_gather_f16;
     vk_pipeline pipeline_flash_attn_gather_dq[GGML_TYPE_COUNT];
@@ -1023,6 +1040,10 @@ struct vk_device_struct {
     vk_pipeline pipeline_ssm_conv_f32;
     vk_pipeline pipeline_ssm_conv_silu_f32;
     vk_pipeline pipeline_ssm_conv_bias_silu_f32;
+    // CONCAT(state, x^T) + SSM_CONV + SILU without the transposed concat: the conv reads x and the state
+    // directly, and the concat node only writes the tail columns its other readers (state copies) use
+    vk_pipeline pipeline_ssm_conv_direct_silu_f32;
+    vk_pipeline pipeline_ssm_conv_tail_f32;
     vk_pipeline pipeline_opt_step_adamw_f32;
     vk_pipeline pipeline_opt_step_sgd_f32;
     std::map<vk_conv2d_pipeline_state, vk_pipeline> pipeline_conv2d_f32[CONV_SHAPE_COUNT];
@@ -1357,6 +1378,21 @@ struct ggml_backend_vk_context {
     bool fused_topk_qsa {};
     bool fused_hc_post_gate {};
     rms_norm_mode fused_rms_norm_mode {RMS_NORM_COUNT};
+    // direct GDN conv: concats matched in this graph (decided at the concat, consumed at its SSM_CONV)
+    struct ssm_conv_direct_match {
+        const ggml_tensor * concat;
+        const ggml_tensor * state;   // [ncs, C, S], contiguous
+        const ggml_tensor * x;       // x^T's storage: [C, T, S], contiguous
+        const ggml_tensor * kern;    // [ncs + 1, C]
+        ggml_tensor * out;           // the SILU node
+        int conv_idx;
+        int64_t tail_from;           // first concat column read by anything but the conv
+    };
+    std::vector<ssm_conv_direct_match> ssm_conv_direct_matches;
+    int fused_concat_tail {-1};      // current CONCAT writes only its tail (index into ssm_conv_direct_matches)
+    int fused_ssm_conv_direct {-1};  // current SSM_CONV (+SILU) runs direct (index into ssm_conv_direct_matches)
+    // set while the current node is a direct conv: srcs read outside node->src (x, state) for the sync tracking
+    const ggml_tensor * fused_extra_srcs[2] {};
 
     // for GGML_VK_PERF_LOGGER
     std::unique_ptr<vk_perf_logger> perf_logger;
