@@ -7,6 +7,8 @@
 #include "../src/llama-hparams.h"
 #include "../src/llama-memory.h"
 #include "../src/llama-vocab.h"
+#include "../src/llama-graph.h"
+#include "ggml-cpu.h"
 
 #include <cstdlib>
 #include <initializer_list>
@@ -1042,6 +1044,40 @@ static void test_mtp_embd_width(testing & t) {
     });
 }
 
+static void test_mrope_graph_input(testing & t) {
+    for (const auto order : { LLAMA_ROPE_SECTION_ORDER_TYXZ, LLAMA_ROPE_SECTION_ORDER_ZYXT }) {
+        for (const bool text : { false, true }) {
+            t.test(std::string(order == LLAMA_ROPE_SECTION_ORDER_ZYXT ? "canvas_" : "default_") + (text ? "text" : "image"), [&](testing & t) {
+                ggml_init_params params = { 1024*1024, nullptr, true };
+                ggml_context * ctx = ggml_init(params);
+                llm_graph_input_pos input(4, order);
+                input.pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 8);
+                auto buffer = ggml_backend_alloc_ctx_tensors_from_buft(ctx, ggml_backend_cpu_buffer_type());
+                GGML_ASSERT(buffer);
+                llama_token tokens[] = { 1, 2 };
+                llama_pos positions[] = { 17, 18, 31, 32, 51, 52, 71, 72 };
+                llama_ubatch batch = {};
+                batch.n_tokens = 2;
+                batch.token = text ? tokens : nullptr;
+                batch.pos = positions;
+                input.set_input(&batch);
+                std::vector<llama_pos> actual(8);
+                ggml_backend_tensor_get(input.pos, actual.data(), 0, actual.size()*sizeof(llama_pos));
+                const std::vector<llama_pos> expected = text
+                    ? std::vector<llama_pos>{ 17, 18, 17, 18, 17, 18, 0, 0 }
+                    : order == LLAMA_ROPE_SECTION_ORDER_ZYXT
+                        ? std::vector<llama_pos>{ 71, 72, 31, 32, 51, 52, 17, 18 }
+                        : std::vector<llama_pos>{ 17, 18, 31, 32, 51, 52, 71, 72 };
+                for (size_t i = 0; i < expected.size(); ++i) {
+                    t.assert_equal(expected[i], actual[i]);
+                }
+                ggml_backend_buffer_free(buffer);
+                ggml_free(ctx);
+            });
+        }
+    }
+}
+
 int main(int argc, char ** argv) {
     testing t;
 
@@ -1063,6 +1099,7 @@ int main(int argc, char ** argv) {
     t.test("split",          test_split);
     t.test("keep_tail",      test_keep_tail);
     t.test("mrope",          test_mrope);
+    t.test("mrope_graph",    test_mrope_graph_input);
     t.test("mtp_embd_width", test_mtp_embd_width);
 
     return t.summary();
